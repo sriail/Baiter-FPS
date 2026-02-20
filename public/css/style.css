@@ -200,9 +200,14 @@ html, body {
 }
 
 /* Code input */
+.code-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .code-input {
-  display: block;
-  width: 100%;
+  flex: 1;
   background: #0a0a0a;
   border: 1px solid #444;
   color: #fff;

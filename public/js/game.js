@@ -1,4 +1,8 @@
 // BaiterFPS - Game Client
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
 (function() {
   'use strict';
 
@@ -129,12 +133,12 @@
     if (text) document.getElementById('loading-text').textContent = text;
   };
 
-  const loader = new THREE.GLTFLoader();
+  const loader = new GLTFLoader();
 
   // Set up DRACO decoder (optional - graceful fallback)
   try {
-    const dracoLoader = new THREE.DRACOLoader();
-    dracoLoader.setDecoderPath('https://unpkg.com/three@0.158.0/examples/js/libs/draco/');
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath('/three/examples/jsm/libs/draco/gltf/');
     loader.setDRACOLoader(dracoLoader);
   } catch(e) {
     console.warn('DRACOLoader not available, skipping');

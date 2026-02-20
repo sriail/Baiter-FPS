@@ -14,6 +14,8 @@ const io = new Server(server, {
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/three/build', express.static(path.join(__dirname, 'node_modules/three/build')));
+app.use('/three/examples/jsm', express.static(path.join(__dirname, 'node_modules/three/examples/jsm')));
 
 const lobbies = new Map(); // lobbyId -> lobby object
 const playerToLobby = new Map(); // socketId -> lobbyId

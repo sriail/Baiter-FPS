@@ -52,7 +52,10 @@
   <div id="code-modal" class="modal" style="display:none;">
     <div class="modal-box">
       <h2 class="modal-title">ENTER LOBBY CODE</h2>
-      <input type="text" id="code-input" class="code-input" placeholder="000000" maxlength="6" oninput="this.value=this.value.replace(/\D/g,'')">
+      <div class="code-input-row">
+        <input type="text" id="code-input" class="code-input" placeholder="000000" maxlength="6" oninput="this.value=this.value.replace(/\D/g,'')">
+        <button class="btn-icon" onclick="pasteCode()" title="Paste code">⧉</button>
+      </div>
       <p id="code-error" class="error-text" style="display:none;"></p>
       <div class="modal-buttons">
         <button class="btn btn-primary" onclick="doJoinByCode()">JOIN</button>
@@ -69,6 +72,7 @@
         <span class="label">LOBBY CODE</span>
         <span id="lobby-code-display" class="lobby-code-value">------</span>
         <button class="btn-icon" onclick="copyCode()" title="Copy code">⧉</button>
+        <button class="btn-icon" onclick="copyLink()" title="Copy lobby link">🔗</button>
       </div>
     </div>
     <div class="lobby-body">

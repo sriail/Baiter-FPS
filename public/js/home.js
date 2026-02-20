@@ -2,7 +2,26 @@
 
 const MAX_NAME_LENGTH = 24;
 
-// Initialize player name
+// ── Chat filter ───────────────────────────────────────────────────────────────
+
+const PROFANITY_LIST = [
+  'fuck','shit','bitch','cunt','cock','dick','pussy','bastard','whore','slut',
+  'nigger','nigga','fag','faggot','asshole','ass','piss','crap','damn','hell'
+];
+
+function censorWord(word) {
+  if (word.length <= 2) return '#'.repeat(word.length);
+  return word[0] + '#'.repeat(word.length - 2) + word[word.length - 1];
+}
+
+function chatFilter(text) {
+  return String(text).replace(/\b\w+\b/g, (word) => {
+    if (PROFANITY_LIST.includes(word.toLowerCase())) return censorWord(word);
+    return word;
+  });
+}
+
+// ── Initialize player name ────────────────────────────────────────────────────
 if (!sessionStorage.getItem('playerName')) {
   sessionStorage.setItem('playerName', window.generateName());
 }
@@ -20,6 +39,14 @@ const socket = io();
 socket.on('connect', () => {
   mySocketId = socket.id;
   console.log('Connected:', socket.id);
+
+  // Auto-join from lobby link (?join=XXXXXX)
+  const params = new URLSearchParams(window.location.search);
+  const joinCode = params.get('join');
+  if (joinCode && /^\d{6}$/.test(joinCode)) {
+    history.replaceState(null, '', window.location.pathname);
+    socket.emit('join_lobby', { code: joinCode, playerName });
+  }
 });
 
 // ── Name change ──────────────────────────────────────────────────────────────
@@ -27,7 +54,7 @@ socket.on('connect', () => {
 window.changeNamePrompt = function() {
   const newName = prompt('Enter new name:', playerName);
   if (newName && newName.trim().length > 0) {
-    playerName = newName.trim().slice(0, MAX_NAME_LENGTH);
+    playerName = chatFilter(newName.trim().slice(0, MAX_NAME_LENGTH));
     sessionStorage.setItem('playerName', playerName);
     document.getElementById('display-name').textContent = playerName;
   }
@@ -48,6 +75,17 @@ window.openCodeModal = function() {
   document.getElementById('code-error').style.display = 'none';
   document.getElementById('code-modal').style.display = 'flex';
   setTimeout(() => document.getElementById('code-input').focus(), 50);
+};
+
+window.pasteCode = function() {
+  navigator.clipboard.readText().then((text) => {
+    const digits = text.replace(/\D/g, '').slice(0, 6);
+    document.getElementById('code-input').value = digits;
+    document.getElementById('code-input').focus();
+  }).catch(() => {
+    showToast('Clipboard access denied');
+    document.getElementById('code-input').focus();
+  });
 };
 
 window.closeModals = function() {
@@ -163,10 +201,11 @@ function renderLobby(lobby) {
   lobby.players.forEach(p => {
     const item = document.createElement('div');
     item.className = 'player-item' + (p.isHost ? ' is-host' : '') + (p.id === mySocketId ? ' is-you' : '');
-    const initials = p.name.slice(0, 2).toUpperCase();
+    const filteredName = chatFilter(p.name);
+    const initials = filteredName.slice(0, 2).toUpperCase();
     item.innerHTML = `
       <div class="player-avatar">${initials}</div>
-      <span class="player-name">${escapeHtml(p.name)}${p.id === mySocketId ? ' (you)' : ''}</span>
+      <span class="player-name">${escapeHtml(filteredName)}${p.id === mySocketId ? ' (you)' : ''}</span>
       ${p.isHost ? '<span class="player-badge" title="Host">♛</span>' : ''}
     `;
     list.appendChild(item);
@@ -206,10 +245,10 @@ function appendChatMessage(msg, scroll = true) {
   const div = document.createElement('div');
   if (msg.system) {
     div.className = 'chat-msg system';
-    div.textContent = msg.text;
+    div.textContent = chatFilter(msg.text);
   } else {
     div.className = 'chat-msg';
-    div.innerHTML = `<span class="msg-sender">${escapeHtml(msg.sender)}</span><span class="msg-text">${escapeHtml(msg.text)}</span>`;
+    div.innerHTML = `<span class="msg-sender">${escapeHtml(chatFilter(msg.sender))}</span><span class="msg-text">${escapeHtml(chatFilter(msg.text))}</span>`;
   }
   chatBox.appendChild(div);
   if (scroll) chatBox.scrollTop = chatBox.scrollHeight;
@@ -233,6 +272,14 @@ window.copyCode = function() {
   const code = document.getElementById('lobby-code-display').textContent;
   navigator.clipboard.writeText(code).then(() => showToast('Code copied!')).catch(() => {
     showToast('Code: ' + code);
+  });
+};
+
+window.copyLink = function() {
+  const code = document.getElementById('lobby-code-display').textContent;
+  const link = new URL('?join=' + code, window.location.href).toString();
+  navigator.clipboard.writeText(link).then(() => showToast('Link copied!')).catch(() => {
+    showToast('Link: ' + link);
   });
 };
 
