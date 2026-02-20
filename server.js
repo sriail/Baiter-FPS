@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
@@ -18,7 +19,7 @@ const lobbies = new Map(); // lobbyId -> lobby object
 const playerToLobby = new Map(); // socketId -> lobbyId
 
 function generateCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return (100000 + crypto.randomInt(900000)).toString();
 }
 
 function createLobby(hostId, hostName, isPublic) {

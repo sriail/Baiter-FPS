@@ -35,11 +35,15 @@ window.changeNamePrompt = function() {
 
 // ── Modal helpers ────────────────────────────────────────────────────────────
 
+let activeModal = null; // 'create' | 'code' | null
+
 window.openCreateModal = function() {
+  activeModal = 'create';
   document.getElementById('create-modal').style.display = 'flex';
 };
 
 window.openCodeModal = function() {
+  activeModal = 'code';
   document.getElementById('code-input').value = '';
   document.getElementById('code-error').style.display = 'none';
   document.getElementById('code-modal').style.display = 'flex';
@@ -47,6 +51,7 @@ window.openCodeModal = function() {
 };
 
 window.closeModals = function() {
+  activeModal = null;
   document.getElementById('create-modal').style.display = 'none';
   document.getElementById('code-modal').style.display = 'none';
 };
@@ -113,8 +118,7 @@ socket.on('lobby_joined', (data) => {
 });
 
 socket.on('join_error', (data) => {
-  // Show error in the appropriate modal
-  if (document.getElementById('code-modal').style.display !== 'none') {
+  if (activeModal === 'code') {
     showCodeError(data.message);
   } else {
     showToast(data.message);

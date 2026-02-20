@@ -58,6 +58,7 @@
   const collisionObjects = [];
   const CHUNK_SIZE = 50;
   const RENDER_DISTANCE = 3;
+  const COLLISION_CHECK_RADIUS_SQ = 400; // 20 units squared
   const chunks = new Map();
   let lastChunkX = Infinity, lastChunkZ = Infinity;
 
@@ -281,7 +282,7 @@
       if (!obj.visible) continue;
       const op = obj.position;
       const dx = op.x - px, dy = op.y - py, dz = op.z - pz;
-      if (dx * dx + dy * dy + dz * dz < 400) result.push(obj); // within 20 units
+      if (dx * dx + dy * dy + dz * dz < COLLISION_CHECK_RADIUS_SQ) result.push(obj);
     }
     return result;
   }
