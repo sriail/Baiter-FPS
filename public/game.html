@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BaiterFPS</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    body { overflow: hidden; background: #000; }
+    #game-canvas { display: block; }
+    #loading {
+      position: fixed; top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: #0a0a0a;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    #pause-menu {
+      display: none;
+      position: fixed; top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.75);
+      z-index: 50;
+      flex-direction: column;
+      align-items: center; justify-content: center;
+    }
+    #hud {
+      position: fixed; top: 12px; left: 12px;
+      color: #ccc;
+      font-family: monospace; font-size: 13px;
+      z-index: 10; line-height: 1.6;
+      pointer-events: none;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+    }
+    #crosshair {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      color: rgba(255,255,255,0.85);
+      font-size: 22px; z-index: 10;
+      pointer-events: none; line-height: 1;
+      text-shadow: 0 0 4px rgba(0,0,0,0.9);
+    }
+    #lock-prompt {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      color: #888; font-family: monospace;
+      font-size: 0.9rem; letter-spacing: 3px;
+      z-index: 10; pointer-events: none;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <h1 style="color:#4fc3f7;font-family:monospace;font-size:3rem;letter-spacing:4px;">BaiterFPS</h1>
+    <p id="loading-text" style="color:#888;margin-top:20px;letter-spacing:2px;font-family:monospace;">Loading map...</p>
+    <div style="width:300px;height:4px;background:#1a1a1a;margin-top:20px;border-radius:2px;">
+      <div id="loading-bar" style="width:0%;height:100%;background:#4fc3f7;border-radius:2px;transition:width 0.3s;"></div>
+    </div>
+  </div>
+
+  <div id="pause-menu">
+    <div style="background:#0f0f0f;border:1px solid #2a2a2a;padding:40px;text-align:center;min-width:300px;">
+      <h2 style="color:#4fc3f7;margin-bottom:30px;letter-spacing:4px;font-family:monospace;">PAUSED</h2>
+      <button class="btn" onclick="resumeGame()" style="display:block;width:100%;margin-bottom:12px;">RESUME</button>
+      <button class="btn" onclick="exitLobby()" style="display:block;width:100%;margin-bottom:12px;">EXIT LOBBY</button>
+      <button class="btn btn-danger-outline" onclick="exitGame()" style="display:block;width:100%;">EXIT GAME</button>
+    </div>
+  </div>
+
+  <div id="hud"></div>
+  <div id="crosshair" style="display:none;">+</div>
+  <div id="lock-prompt">CLICK TO PLAY</div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.158.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://unpkg.com/three@0.158.0/examples/js/loaders/DRACOLoader.js"></script>
+  <script src="/js/game.js"></script>
+</body>
+</html>

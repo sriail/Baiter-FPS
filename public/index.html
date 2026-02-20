@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BaiterFPS</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <!-- Home Screen -->
+  <div id="home-screen" class="screen">
+    <div class="home-container">
+      <div class="title-block">
+        <h1 class="game-title">BaiterFPS</h1>
+        <p class="game-subtitle">TACTICAL MULTIPLAYER SHOOTER</p>
+      </div>
+      <div class="player-name-display">
+        Playing as: <span id="display-name" class="name-highlight"></span>
+        <button class="btn-link" onclick="changeNamePrompt()">change</button>
+      </div>
+      <div class="home-buttons">
+        <button class="btn btn-primary" onclick="openCreateModal()">CREATE LOBBY</button>
+        <button class="btn" onclick="openCodeModal()">ENTER CODE</button>
+        <button class="btn" onclick="quickPlay()">PLAY</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Lobby Modal -->
+  <div id="create-modal" class="modal" style="display:none;">
+    <div class="modal-box">
+      <h2 class="modal-title">CREATE LOBBY</h2>
+      <div class="form-group">
+        <label class="form-label">VISIBILITY</label>
+        <div class="toggle-row">
+          <span>Private</span>
+          <label class="toggle">
+            <input type="checkbox" id="create-public-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+          <span>Public</span>
+        </div>
+      </div>
+      <div class="modal-buttons">
+        <button class="btn btn-primary" onclick="doCreateLobby()">CREATE</button>
+        <button class="btn" onclick="closeModals()">CANCEL</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Enter Code Modal -->
+  <div id="code-modal" class="modal" style="display:none;">
+    <div class="modal-box">
+      <h2 class="modal-title">ENTER LOBBY CODE</h2>
+      <input type="text" id="code-input" class="code-input" placeholder="000000" maxlength="6" oninput="this.value=this.value.replace(/\D/g,'')">
+      <p id="code-error" class="error-text" style="display:none;"></p>
+      <div class="modal-buttons">
+        <button class="btn btn-primary" onclick="doJoinByCode()">JOIN</button>
+        <button class="btn" onclick="closeModals()">CANCEL</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lobby Screen -->
+  <div id="lobby-screen" class="screen" style="display:none;">
+    <div class="lobby-header">
+      <span class="lobby-title">BaiterFPS</span>
+      <div class="lobby-code-block">
+        <span class="label">LOBBY CODE</span>
+        <span id="lobby-code-display" class="lobby-code-value">------</span>
+        <button class="btn-icon" onclick="copyCode()" title="Copy code">⧉</button>
+      </div>
+    </div>
+    <div class="lobby-body">
+      <!-- Left: Player List -->
+      <div class="lobby-panel">
+        <h3 class="panel-title">PLAYERS <span id="player-count">0/16</span></h3>
+        <div id="player-list" class="player-list"></div>
+      </div>
+      <!-- Center: Map + Controls -->
+      <div class="lobby-main">
+        <div class="map-card">
+          <div class="map-thumbnail">
+            <span class="map-icon">🏙</span>
+          </div>
+          <div class="map-info">
+            <div class="map-name">ARABIC CITY</div>
+            <div class="map-desc">Urban close-quarters combat</div>
+          </div>
+        </div>
+        <div class="visibility-row" id="visibility-row" style="display:none;">
+          <span class="label">VISIBILITY</span>
+          <div class="toggle-row">
+            <span>Private</span>
+            <label class="toggle">
+              <input type="checkbox" id="lobby-public-toggle" onchange="setVisibility(this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+            <span>Public</span>
+          </div>
+        </div>
+        <div id="start-area" class="start-area">
+          <button id="start-btn" class="btn btn-primary start-btn" onclick="startGame()" style="display:none;">START GAME</button>
+          <p id="waiting-text" class="waiting-text" style="display:none;">Waiting for host to start...</p>
+        </div>
+      </div>
+      <!-- Right: Chat -->
+      <div class="lobby-panel">
+        <h3 class="panel-title">CHAT</h3>
+        <div id="chat-messages" class="chat-box"></div>
+        <div class="chat-input-row">
+          <input type="text" id="chat-input" class="chat-input" placeholder="Type a message..." maxlength="200" onkeydown="chatKeydown(event)">
+          <button class="btn btn-small" onclick="sendChat()">SEND</button>
+        </div>
+      </div>
+    </div>
+    <div class="lobby-footer">
+      <button class="btn btn-danger-outline" onclick="leaveLobby()">LEAVE LOBBY</button>
+    </div>
+  </div>
+
+  <!-- Notification toast -->
+  <div id="toast" class="toast" style="display:none;"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/names.js"></script>
+  <script src="/js/home.js"></script>
+</body>
+</html>
