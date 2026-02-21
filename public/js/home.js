@@ -30,6 +30,12 @@ let playerName = sessionStorage.getItem('playerName');
 let currentLobby = null;
 let mySocketId = null;
 
+// Generate a unique rejoin token per browser session for reliable socket ID remapping
+if (!sessionStorage.getItem('rejoinToken')) {
+  sessionStorage.setItem('rejoinToken', Math.random().toString(36).slice(2) + Date.now().toString(36));
+}
+const rejoinToken = sessionStorage.getItem('rejoinToken');
+
 // Display name on home screen
 document.getElementById('display-name').textContent = playerName;
 
@@ -104,8 +110,7 @@ document.querySelectorAll('.modal').forEach(m => {
 // ── Create lobby ─────────────────────────────────────────────────────────────
 
 window.doCreateLobby = function() {
-  const isPublic = document.getElementById('create-public-toggle').checked;
-  socket.emit('create_lobby', { playerName, isPublic });
+  socket.emit('create_lobby', { playerName });
   window.closeModals();
 };
 
@@ -133,7 +138,7 @@ function showCodeError(msg) {
 // ── Quick play ───────────────────────────────────────────────────────────────
 
 window.quickPlay = function() {
-  socket.emit('quick_play', { playerName });
+  socket.emit('quick_play', { playerName, rejoinToken });
 };
 
 // ── Socket: lobby events ─────────────────────────────────────────────────────
@@ -174,8 +179,14 @@ socket.on('chat_message', (msg) => {
 });
 
 socket.on('game_start', (data) => {
-  // Save lobby data and redirect to game
-  sessionStorage.setItem('lobbyData', JSON.stringify(currentLobby || {}));
+  // Save game data and redirect to game
+  if (data && data.players) {
+    sessionStorage.setItem('lobbyData', JSON.stringify(data));
+    if (data.code) sessionStorage.setItem('lobbyCode', data.code);
+    if (data.lobbyId) sessionStorage.setItem('lobbyId', data.lobbyId);
+  } else if (currentLobby) {
+    sessionStorage.setItem('lobbyData', JSON.stringify(currentLobby));
+  }
   window.location.href = '/game.html';
 });
 
@@ -211,13 +222,8 @@ function renderLobby(lobby) {
     list.appendChild(item);
   });
 
-  // Visibility toggle (host only)
-  const visRow = document.getElementById('visibility-row');
+  // Visibility toggle removed - all parties are code-only
   const isHost = lobby.hostId === mySocketId;
-  visRow.style.display = isHost ? 'flex' : 'none';
-  if (isHost) {
-    document.getElementById('lobby-public-toggle').checked = lobby.isPublic;
-  }
 
   // Start button / waiting text
   const startBtn = document.getElementById('start-btn');
@@ -279,7 +285,7 @@ window.copyLink = function() {
   const code = document.getElementById('lobby-code-display').textContent;
   const link = new URL('?join=' + code, window.location.href).toString();
   navigator.clipboard.writeText(link).then(() => showToast('Link copied!')).catch(() => {
-    showToast('Link: ' + link);
+    showToast('Party link: ' + link);
   });
 };
 

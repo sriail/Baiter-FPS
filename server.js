@@ -36,7 +36,8 @@ function createLobby(hostId, hostName, isPublic) {
     players: [{ id: hostId, name: hostName, isHost: true }],
     gameStarted: false,
     chat: [],
-    maxPlayers: 16
+    maxPlayers: 16,
+    playerPositions: {} // socketId -> {x,y,z,rotY,rotX}
   };
   lobbies.set(id, lobby);
   lobbies.set(code, lobby);
@@ -73,12 +74,12 @@ function serializeLobby(lobby) {
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
-  socket.on('create_lobby', ({ playerName, isPublic }) => {
-    const lobby = createLobby(socket.id, playerName || 'Player', !!isPublic);
+  socket.on('create_lobby', ({ playerName }) => {
+    const lobby = createLobby(socket.id, playerName || 'Player', false);
     playerToLobby.set(socket.id, lobby.id);
     socket.join(lobby.id);
     socket.emit('lobby_created', { lobbyId: lobby.id, code: lobby.code, lobby: serializeLobby(lobby) });
-    console.log(`Lobby created: ${lobby.code} by ${playerName}`);
+    console.log(`Party created: ${lobby.code} by ${playerName}`);
   });
 
   socket.on('join_lobby', ({ code, playerName }) => {
@@ -99,26 +100,38 @@ io.on('connection', (socket) => {
     socket.emit('lobby_joined', { lobbyId: lobby.id, code: lobby.code, lobby: serializeLobby(lobby) });
   });
 
-  socket.on('quick_play', ({ playerName }) => {
+  socket.on('quick_play', ({ playerName, rejoinToken }) => {
+    const name = playerName || 'Player';
+    // Find a public lobby (not full) - prefer not-yet-started, then already started
     for (const [key, lobby] of lobbies) {
-      if (key === lobby.id && lobby.isPublic && !lobby.gameStarted && lobby.players.length < lobby.maxPlayers) {
-        const name = playerName || 'Player';
-        lobby.players.push({ id: socket.id, name, isHost: false });
-        playerToLobby.set(socket.id, lobby.id);
-        socket.join(lobby.id);
-        const msg = { system: true, text: `${name} joined the lobby`, timestamp: Date.now() };
-        lobby.chat.push(msg);
-        io.to(lobby.id).emit('chat_message', msg);
+      if (key !== lobby.id) continue;
+      if (!lobby.isPublic) continue;
+      if (lobby.players.length >= lobby.maxPlayers) continue;
+      // Join this lobby
+      lobby.players.push({ id: socket.id, name, isHost: false, rejoinToken: rejoinToken || null });
+      playerToLobby.set(socket.id, lobby.id);
+      socket.join(lobby.id);
+      if (!lobby.gameStarted) {
+        // Start game for everyone in the lobby
+        lobby.gameStarted = true;
+        io.to(lobby.id).emit('game_start', { map: lobby.map, players: lobby.players, lobbyId: lobby.id, code: lobby.code });
+      } else {
+        // Game already running - send new player straight to game, announce to others
+        socket.emit('game_start', { map: lobby.map, players: lobby.players, lobbyId: lobby.id, code: lobby.code });
         io.to(lobby.id).emit('lobby_update', serializeLobby(lobby));
-        socket.emit('lobby_joined', { lobbyId: lobby.id, code: lobby.code, lobby: serializeLobby(lobby) });
-        return;
+        const joinMsg = { system: true, text: `${name} joined the game`, timestamp: Date.now() };
+        io.to(lobby.id).emit('game_chat_message', joinMsg);
       }
+      return;
     }
-    // No public lobby found - create one
-    const lobby = createLobby(socket.id, playerName || 'Player', true);
+    // No suitable lobby - create one and start immediately
+    const lobby = createLobby(socket.id, name, true);
+    // Store rejoin token on host player
+    if (rejoinToken) lobby.players[0].rejoinToken = rejoinToken;
     playerToLobby.set(socket.id, lobby.id);
     socket.join(lobby.id);
-    socket.emit('lobby_created', { lobbyId: lobby.id, code: lobby.code, lobby: serializeLobby(lobby) });
+    lobby.gameStarted = true;
+    socket.emit('game_start', { map: lobby.map, players: lobby.players, lobbyId: lobby.id, code: lobby.code });
   });
 
   socket.on('chat_message', ({ text }) => {
@@ -148,13 +161,69 @@ io.on('connection', (socket) => {
     const lobby = lobbies.get(lobbyId);
     if (!lobby || lobby.hostId !== socket.id) return;
     lobby.gameStarted = true;
-    io.to(lobbyId).emit('game_start', { map: lobby.map, players: lobby.players });
+    io.to(lobbyId).emit('game_start', { map: lobby.map, players: lobby.players, lobbyId: lobby.id, code: lobby.code });
   });
 
   socket.on('player_move', (data) => {
     const lobbyId = playerToLobby.get(socket.id);
     if (!lobbyId) return;
+    const lobby = lobbies.get(lobbyId);
+  // Store player's position in the lobby (socketId -> {x,y,z,rotY,rotX})
+    if (lobby) lobby.playerPositions[socket.id] = data;
     socket.to(lobbyId).emit('player_moved', { id: socket.id, ...data });
+  });
+
+  socket.on('rejoin_game', ({ lobbyCode, playerName, rejoinToken }) => {
+    const lobby = lobbies.get(lobbyCode);
+    if (!lobby) return;
+    // Match player by rejoin token (unique per session) or fall back to name
+    let existing = rejoinToken
+      ? lobby.players.find(p => p.rejoinToken === rejoinToken)
+      : null;
+    if (!existing) {
+      existing = lobby.players.find(p => p.name === (playerName || 'Player') && !p.rejoinToken);
+    }
+    const isNewPlayer = !existing;
+    if (existing) {
+      // Remove old socket mapping if different
+      if (existing.id !== socket.id) {
+        playerToLobby.delete(existing.id);
+        existing.id = socket.id;
+      }
+    } else {
+      lobby.players.push({ id: socket.id, name: playerName || 'Player', isHost: false });
+    }
+    playerToLobby.set(socket.id, lobby.id);
+    socket.join(lobby.id);
+    // Send this new player all existing player positions with names
+    // Format: { socketId: {x,y,z,rotY,rotX,name} }
+    const positionsWithNames = {};
+    for (const [sid, pos] of Object.entries(lobby.playerPositions)) {
+      const player = lobby.players.find(p => p.id === sid);
+      positionsWithNames[sid] = { ...pos, name: player ? player.name : 'Player' };
+    }
+    socket.emit('sync_positions', positionsWithNames);
+    // Tell others to resend their positions
+    socket.to(lobby.id).emit('resync_request');
+    io.to(lobby.id).emit('lobby_update', serializeLobby(lobby));
+    // Announce new player joining to everyone in the game
+    if (isNewPlayer) {
+      const name = playerName || 'Player';
+      const joinMsg = { system: true, text: `${name} joined the game`, timestamp: Date.now() };
+      io.to(lobby.id).emit('game_chat_message', joinMsg);
+    }
+  });
+
+  socket.on('game_chat_message', ({ text }) => {
+    const lobbyId = playerToLobby.get(socket.id);
+    if (!lobbyId) return;
+    const lobby = lobbies.get(lobbyId);
+    if (!lobby) return;
+    const name = getPlayerName(lobby, socket.id);
+    const msg = { system: false, sender: name, text: String(text).slice(0, 200), timestamp: Date.now() };
+    lobby.chat.push(msg);
+    if (lobby.chat.length > 100) lobby.chat.shift();
+    io.to(lobbyId).emit('game_chat_message', msg);
   });
 
   socket.on('leave_lobby', () => {
@@ -176,6 +245,7 @@ io.on('connection', (socket) => {
     const playerName = player ? player.name : 'Unknown';
 
     lobby.players = lobby.players.filter(p => p.id !== socket.id);
+    delete lobby.playerPositions[socket.id];
     playerToLobby.delete(socket.id);
     socket.leave(lobbyId);
 
@@ -192,6 +262,8 @@ io.on('connection', (socket) => {
     const msg = { system: true, text: `${playerName} left the lobby`, timestamp: Date.now() };
     lobby.chat.push(msg);
     io.to(lobbyId).emit('chat_message', msg);
+    // Also announce in-game chat
+    io.to(lobbyId).emit('game_chat_message', { system: true, text: `${playerName} left the game`, timestamp: Date.now() });
     io.to(lobbyId).emit('lobby_update', serializeLobby(lobby));
     io.to(lobbyId).emit('player_left', { id: socket.id });
   }

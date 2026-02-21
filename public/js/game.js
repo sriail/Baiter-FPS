@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
 (function() {
   'use strict';
@@ -9,6 +10,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
   const socket = io();
   const playerName = sessionStorage.getItem('playerName') || 'Player';
   const lobbyCode = sessionStorage.getItem('lobbyCode') || '';
+  const rejoinToken = sessionStorage.getItem('rejoinToken') || '';
   let lobbyData = JSON.parse(sessionStorage.getItem('lobbyData') || '{}');
 
   // ── Three.js Setup ────────────────────────────────────────────────────────
@@ -18,7 +20,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
   scene.fog = new THREE.Fog(0x87ceeb, 80, 220);
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
-  camera.position.set(0, 3, 0);
+  camera.position.set(0, 0.3, 0);
 
   const renderer = new THREE.WebGLRenderer({ antialias: false });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -27,12 +29,23 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
   document.body.appendChild(renderer.domElement);
   renderer.domElement.id = 'game-canvas';
 
+  // Weapon scene rendered on top (prevents clipping through walls)
+  const weaponScene = new THREE.Scene();
+  const weaponCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.001, 10);
+  renderer.autoClear = false;
+
   // Lights
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
   scene.add(ambientLight);
   const dirLight = new THREE.DirectionalLight(0xfffde7, 0.9);
   dirLight.position.set(60, 120, 60);
   scene.add(dirLight);
+
+  // Weapon lights (mirrored for weapon scene)
+  weaponScene.add(new THREE.AmbientLight(0xffffff, 0.9));
+  const wDirLight = new THREE.DirectionalLight(0xfffde7, 0.8);
+  wDirLight.position.set(1, 2, 1);
+  weaponScene.add(wDirLight);
 
   // ── Player State ──────────────────────────────────────────────────────────
 
@@ -44,16 +57,16 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
   let isPaused = false;
   let isPointerLocked = false;
 
-  const GRAVITY = -22;
-  const PLAYER_SPEED = 9;
-  const JUMP_FORCE = 9;
-  const PLAYER_HEIGHT = 1.8;
-  const MIN_WORLD_HEIGHT = -80;
+  // Player scaled to 1/10 of original size to match map scale
+  const GRAVITY = -2.2;
+  const PLAYER_SPEED = 0.9;
+  const JUMP_FORCE = 0.9;
+  const PLAYER_HEIGHT = 0.18;
+  const MIN_WORLD_HEIGHT = -8;
 
   // ── Other Players ─────────────────────────────────────────────────────────
 
-  const otherPlayers = new Map(); // id -> { mesh, targetPos, nameSprite }
-  const playerGeo = new THREE.BoxGeometry(0.6, 1.8, 0.6);
+  const otherPlayers = new Map(); // id -> { mesh, targetPos }
   const playerColors = [0x4fc3f7, 0xff6b6b, 0x6bff6b, 0xffff6b, 0xff6bff, 0x6bffff, 0xff9f43, 0xa29bfe];
   let colorIndex = 0;
 
@@ -61,8 +74,8 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
   const collisionObjects = [];
   const CHUNK_SIZE = 50;
-  const RENDER_DISTANCE = 3;
-  const COLLISION_CHECK_RADIUS_SQ = 400; // 20 units squared
+  const RENDER_DISTANCE = 2;
+  const COLLISION_CHECK_RADIUS_SQ = 25; // 5 units radius (optimized for 1/10 player scale)
   const chunks = new Map();
   let lastChunkX = Infinity, lastChunkZ = Infinity;
 
@@ -76,8 +89,8 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
   document.addEventListener('pointerlockchange', () => {
     isPointerLocked = document.pointerLockElement === renderer.domElement;
-    document.getElementById('crosshair').style.display = isPointerLocked ? 'block' : 'none';
-    document.getElementById('lock-prompt').style.display = isPointerLocked ? 'none' : 'block';
+    document.getElementById('crosshair').style.color = isPointerLocked
+      ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.3)';
   });
 
   document.addEventListener('mousemove', (e) => {
@@ -89,10 +102,68 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     camera.quaternion.setFromEuler(euler);
   });
 
+  // ── In-game Chat ──────────────────────────────────────────────────────────
+
+  let chatOpen = false;
+
+  function openChat() {
+    if (chatOpen) return;
+    chatOpen = true;
+    if (isPointerLocked) document.exitPointerLock();
+    document.getElementById('game-chat-input-row').style.display = 'flex';
+    document.getElementById('game-chat-hint').style.display = 'none';
+    // Small delay to allow DOM to settle before focusing the input
+    setTimeout(() => document.getElementById('game-chat-input').focus(), 30);
+  }
+
+  function closeChat() {
+    if (!chatOpen) return;
+    chatOpen = false;
+    document.getElementById('game-chat-input').value = '';
+    document.getElementById('game-chat-input-row').style.display = 'none';
+    document.getElementById('game-chat-hint').style.display = '';
+    if (!isPaused && mapLoaded) renderer.domElement.requestPointerLock();
+  }
+
+  function sendGameChat() {
+    const input = document.getElementById('game-chat-input');
+    const text = input.value.trim();
+    if (text) socket.emit('game_chat_message', { text });
+    closeChat();
+  }
+
+  function addGameChatMessage(msg) {
+    const box = document.getElementById('game-chat-messages');
+    if (!box) return;
+    const div = document.createElement('div');
+    div.className = 'game-chat-msg' + (msg.system ? ' system' : '');
+    if (msg.system) {
+      div.textContent = msg.text;
+    } else {
+      const sender = document.createElement('span');
+      sender.className = 'msg-sender';
+      sender.textContent = (msg.sender || 'Player') + ': ';
+      div.appendChild(sender);
+      div.appendChild(document.createTextNode(msg.text || ''));
+    }
+    box.appendChild(div);
+    // Keep max 20 messages visible
+    while (box.children.length > 20) box.removeChild(box.firstChild);
+    // Fade out after 8 seconds, remove after 10
+    setTimeout(() => div.classList.add('fade'), 8000);
+    setTimeout(() => { if (div.parentNode) div.remove(); }, 10000);
+  }
+
   // ── Keyboard ──────────────────────────────────────────────────────────────
 
   document.addEventListener('keydown', (e) => {
+    if (chatOpen) {
+      if (e.code === 'Enter') { e.preventDefault(); sendGameChat(); }
+      if (e.code === 'Escape') { e.preventDefault(); closeChat(); }
+      return; // swallow all other keys while chat is open
+    }
     keys[e.code] = true;
+    if (e.code === 'KeyT' && !isPaused) { e.preventDefault(); openChat(); }
     if (e.code === 'Space' && canJump) {
       velocity.y = JUMP_FORCE;
       canJump = false;
@@ -164,9 +235,11 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
         child.castShadow = false;
         child.receiveShadow = false;
 
-        // Assign to spatial chunk
+        // Cache world position for fast collision checks
         const pos = new THREE.Vector3();
         child.getWorldPosition(pos);
+        child.userData.cachedWorldPos = pos.clone();
+
         const cx = Math.floor(pos.x / CHUNK_SIZE);
         const cz = Math.floor(pos.z / CHUNK_SIZE);
         const key = cx + ',' + cz;
@@ -215,6 +288,79 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     }
   }
 
+  // ── Gun Model Loading ─────────────────────────────────────────────────────
+
+  const fbxLoader = new FBXLoader();
+  let weaponMixer = null;
+  // Container: stock rests in bottom-right corner, barrel extends toward center
+  const gunContainer = new THREE.Group();
+  gunContainer.position.set(0.18, -0.13, -0.22);
+  // Slight downward tilt so barrel aims toward crosshair
+  gunContainer.rotation.set(0.08, -0.05, 0.04);
+  weaponScene.add(gunContainer);
+
+  fbxLoader.load(
+    '/weapons/gun-m4a1/source/Gun_M41D.fbx',
+    (fbx) => {
+      // Normalise scale: fit longest axis to 0.38 world units (slightly smaller rifle hold)
+      const bbox = new THREE.Box3().setFromObject(fbx);
+      const bsize = bbox.getSize(new THREE.Vector3());
+      const maxDim = Math.max(bsize.x, bsize.y, bsize.z);
+      if (maxDim <= 0) { console.warn('Gun model has zero size'); return; }
+      const targetLen = 0.38; // gun barrel length in weapon-scene units
+      const scale = targetLen / maxDim;
+      fbx.scale.setScalar(scale);
+
+      // Centre pivot so the model sits at the container origin
+      const scaledBox = new THREE.Box3().setFromObject(fbx);
+      const center = scaledBox.getCenter(new THREE.Vector3());
+      fbx.position.sub(center);
+
+      // 120° Y rotation: barrel points forward-left toward crosshair;
+      // stock/butt sits in the bottom-right corner facing slightly left.
+      fbx.rotation.set(0, 2 * Math.PI / 3, 0);
+
+      // Load the actual PNG texture (FBX references TGA which isn't supported)
+      const texLoader = new THREE.TextureLoader();
+      texLoader.load(
+        '/weapons/gun-m4a1/textures/M4_D.png',
+        (tex) => {
+          const mat = new THREE.MeshLambertMaterial({ map: tex });
+          fbx.traverse((child) => {
+            if (child.isMesh) {
+              child.material = mat;
+              child.castShadow = false;
+              child.receiveShadow = false;
+            }
+          });
+        },
+        null,
+        () => {
+          const metalMat = new THREE.MeshLambertMaterial({ color: 0x444444 });
+          fbx.traverse((child) => {
+            if (child.isMesh) {
+              child.material = metalMat;
+              child.castShadow = false;
+              child.receiveShadow = false;
+            }
+          });
+        }
+      );
+
+      gunContainer.add(fbx);
+
+      // Set up animation mixer if FBX has animations
+      if (fbx.animations && fbx.animations.length > 0) {
+        weaponMixer = new THREE.AnimationMixer(fbx);
+        const action = weaponMixer.clipAction(fbx.animations[0]);
+        action.play();
+      }
+      console.log('Gun model loaded');
+    },
+    null,
+    (err) => console.warn('Gun load failed:', err)
+  );
+
   // ── Chunk Visibility ──────────────────────────────────────────────────────
 
   function updateChunkVisibility(force) {
@@ -249,17 +395,77 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     const tex = new THREE.CanvasTexture(canvas);
     const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
     const sprite = new THREE.Sprite(mat);
-    sprite.position.set(0, 1.4, 0);
-    sprite.scale.set(2.2, 0.55, 1);
+    sprite.position.set(0, 0.14, 0);
+    sprite.scale.set(0.5, 0.13, 1);
     return sprite;
+  }
+
+  function createPlayerMesh(color) {
+    const group = new THREE.Group();
+    const mat = new THREE.MeshLambertMaterial({ color });
+    const r = ((color >> 16) & 0xff) * 0.7 | 0;
+    const g = ((color >> 8) & 0xff) * 0.7 | 0;
+    const b = (color & 0xff) * 0.7 | 0;
+    const darkColor = (r << 16) | (g << 8) | b;
+    const darkMat = new THREE.MeshLambertMaterial({ color: darkColor });
+    const weaponMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+    const s = 0.1; // 1/10 scale factor
+
+    // Body
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.6 * s, 0.7 * s, 0.3 * s), mat);
+    body.position.y = 0.85 * s;
+    group.add(body);
+    // Head
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.4 * s, 0.35 * s, 0.35 * s), mat);
+    head.position.y = 1.42 * s;
+    group.add(head);
+
+    // Left arm (simple, no animation group needed)
+    const lArm = new THREE.Mesh(new THREE.BoxGeometry(0.2 * s, 0.6 * s, 0.2 * s), mat);
+    lArm.position.set(-0.4 * s, 0.85 * s, 0);
+    group.add(lArm);
+
+    // Right arm group – rotates as the player "holds" and walks with the weapon
+    const rArmGroup = new THREE.Group();
+    rArmGroup.position.set(0.4 * s, 0.85 * s, 0);
+    group.add(rArmGroup);
+    const rArm = new THREE.Mesh(new THREE.BoxGeometry(0.2 * s, 0.6 * s, 0.2 * s), mat);
+    rArmGroup.add(rArm);
+    // Gun body attached to right arm (moves with arm animation)
+    const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.12 * s, 0.08 * s, 0.45 * s), weaponMat);
+    gunBody.position.set(0, -0.02 * s, -0.28 * s);
+    rArmGroup.add(gunBody);
+    // Gun barrel
+    const gunBarrel = new THREE.Mesh(new THREE.BoxGeometry(0.04 * s, 0.04 * s, 0.3 * s), weaponMat);
+    gunBarrel.position.set(0, 0.06 * s, -0.45 * s);
+    rArmGroup.add(gunBarrel);
+
+    // Left leg group
+    const lLegGroup = new THREE.Group();
+    lLegGroup.position.set(-0.17 * s, 0.3 * s, 0);
+    group.add(lLegGroup);
+    lLegGroup.add(new THREE.Mesh(new THREE.BoxGeometry(0.25 * s, 0.6 * s, 0.25 * s), darkMat));
+
+    // Right leg group
+    const rLegGroup = new THREE.Group();
+    rLegGroup.position.set(0.17 * s, 0.3 * s, 0);
+    group.add(rLegGroup);
+    rLegGroup.add(new THREE.Mesh(new THREE.BoxGeometry(0.25 * s, 0.6 * s, 0.25 * s), darkMat));
+
+    // Store animatable references on the group's userData
+    group.userData.rArmGroup = rArmGroup;
+    group.userData.lLegGroup = lLegGroup;
+    group.userData.rLegGroup = rLegGroup;
+
+    return group;
   }
 
   function addPlayer(id, name, pos) {
     if (otherPlayers.has(id)) return;
     const color = playerColors[colorIndex++ % playerColors.length];
-    const mat = new THREE.MeshLambertMaterial({ color });
-    const mesh = new THREE.Mesh(playerGeo, mat);
-    mesh.position.set(pos.x || 0, (pos.y || 2) - 0.9, pos.z || 0);
+    const mesh = createPlayerMesh(color);
+    const yOffset = PLAYER_HEIGHT * 0.5;
+    mesh.position.set(pos.x || 0, (pos.y || PLAYER_HEIGHT) - yOffset, pos.z || 0);
     const sprite = makeNameSprite(name || 'Player');
     mesh.add(sprite);
     scene.add(mesh);
@@ -275,20 +481,26 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
   const _downOrigin = new THREE.Vector3();
   const _downDir = new THREE.Vector3(0, -1, 0);
+  const _wallDir = new THREE.Vector3(); // reused each frame – avoids per-frame alloc
   const _raycasterDown = new THREE.Raycaster();
   const _raycasterWall = new THREE.Raycaster();
+  const _tmpPos = new THREE.Vector3(); // reused for world position fallback
+  const _nearbyCache = []; // reused result array – avoids per-frame alloc
 
   function getNearbyColliders() {
-    const result = [];
+    _nearbyCache.length = 0;
     const px = camera.position.x, py = camera.position.y, pz = camera.position.z;
     for (let i = 0; i < collisionObjects.length; i++) {
       const obj = collisionObjects[i];
       if (!obj.visible) continue;
-      const op = obj.position;
-      const dx = op.x - px, dy = op.y - py, dz = op.z - pz;
-      if (dx * dx + dy * dy + dz * dz < COLLISION_CHECK_RADIUS_SQ) result.push(obj);
+      // Use cached world position for fast distance check
+      const wp = obj.userData.cachedWorldPos
+        ? obj.userData.cachedWorldPos
+        : obj.getWorldPosition(_tmpPos);
+      const dx = wp.x - px, dy = wp.y - py, dz = wp.z - pz;
+      if (dx * dx + dy * dy + dz * dz < COLLISION_CHECK_RADIUS_SQ) _nearbyCache.push(obj);
     }
-    return result;
+    return _nearbyCache;
   }
 
   // ── Animation Loop ────────────────────────────────────────────────────────
@@ -327,10 +539,11 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
       const nearbyColliders = getNearbyColliders();
 
-      // Wall check
+      // Wall check (reuse _wallDir to avoid per-frame allocation)
       if (len > 0) {
-        _raycasterWall.set(camera.position, new THREE.Vector3(moveX, 0, moveZ).normalize());
-        _raycasterWall.far = 0.55;
+        _wallDir.set(moveX, 0, moveZ).normalize();
+        _raycasterWall.set(camera.position, _wallDir);
+        _raycasterWall.far = 0.055;
         const wallHits = _raycasterWall.intersectObjects(nearbyColliders, true);
         if (wallHits.length === 0) {
           camera.position.x += moveX * spd;
@@ -342,9 +555,9 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
       camera.position.y += velocity.y * delta;
 
       // Ground check
-      _downOrigin.set(camera.position.x, camera.position.y - 0.1, camera.position.z);
+      _downOrigin.set(camera.position.x, camera.position.y - 0.01, camera.position.z);
       _raycasterDown.set(_downOrigin, _downDir);
-      _raycasterDown.far = PLAYER_HEIGHT + 0.3;
+      _raycasterDown.far = PLAYER_HEIGHT + 0.03;
       const groundHits = _raycasterDown.intersectObjects(nearbyColliders, true);
       if (groundHits.length > 0 && velocity.y <= 0) {
         camera.position.y = groundHits[0].point.y + PLAYER_HEIGHT;
@@ -360,10 +573,34 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
       }
     }
 
-    // Interpolate other players
+    // Interpolate other players + animate arms/legs/gun
+    const elapsed = clock.getElapsedTime();
     otherPlayers.forEach(p => {
       p.mesh.position.lerp(p.targetPos, 0.18);
+      const moveDist = p.mesh.position.distanceTo(p.targetPos);
+      const isMoving = moveDist > 0.002;
+      const freq = isMoving ? 7 : 1.5;
+      const armAmt = isMoving ? 0.3 : 0.06;
+      const legAmt = isMoving ? 0.4 : 0;
+      const meshData = p.mesh.userData;
+      if (meshData.rArmGroup) meshData.rArmGroup.rotation.x = Math.sin(elapsed * freq) * armAmt;
+      if (meshData.lLegGroup) meshData.lLegGroup.rotation.x = Math.sin(elapsed * freq) * legAmt;
+      if (meshData.rLegGroup) meshData.rLegGroup.rotation.x = Math.sin(elapsed * freq + Math.PI) * legAmt;
     });
+
+    // Update weapon animations (FBX mixer)
+    if (weaponMixer) weaponMixer.update(delta);
+
+    // Local gun bob (walk sway or idle sway)
+    if (mapLoaded) {
+      const isMoving = isPointerLocked &&
+        (keys['KeyW'] || keys['KeyA'] || keys['KeyS'] || keys['KeyD']);
+      const bobFreq = isMoving ? 7 : 1.5;
+      const bobY   = isMoving ? 0.007 : 0.002;
+      const bobX   = isMoving ? 0.003 : 0.001;
+      gunContainer.position.y = -0.13 + Math.sin(elapsed * bobFreq) * bobY;
+      gunContainer.position.x =  0.18 + Math.sin(elapsed * bobFreq * 0.5) * bobX;
+    }
 
     // Chunk update (every 500ms)
     if (now - lastChunkCheck > 500) {
@@ -383,13 +620,22 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
       lastMoveEmit = now;
     }
 
+    renderer.clear();
     renderer.render(scene, camera);
+    // Render weapon on top
+    renderer.clearDepth();
+    weaponCamera.quaternion.copy(camera.quaternion);
+    renderer.render(weaponScene, weaponCamera);
   }
 
   // ── Socket Events ─────────────────────────────────────────────────────────
 
   socket.on('connect', () => {
     console.log('Game socket connected:', socket.id);
+    // Rejoin the lobby room (new socket ID after page navigation)
+    if (lobbyCode) {
+      socket.emit('rejoin_game', { lobbyCode, playerName, rejoinToken });
+    }
     updateHUD();
   });
 
@@ -402,8 +648,32 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     }
     const p = otherPlayers.get(data.id);
     if (p) {
-      p.targetPos.set(data.x, data.y - 0.9, data.z);
+      p.targetPos.set(data.x, data.y - PLAYER_HEIGHT * 0.5, data.z);
       p.mesh.rotation.y = data.rotY || 0;
+    }
+  });
+
+  // Server asks this client to resend position (new player joined)
+  socket.on('resync_request', () => {
+    socket.emit('player_move', {
+      x: camera.position.x,
+      y: camera.position.y,
+      z: camera.position.z,
+      rotY: euler.y,
+      rotX: euler.x
+    });
+  });
+
+  // Server sends existing player positions when we rejoin
+  // Format: { socketId: {x,y,z,rotY,rotX,name} }
+  socket.on('sync_positions', (positions) => {
+    for (const [id, pos] of Object.entries(positions)) {
+      if (id === socket.id) continue;
+      if (!otherPlayers.has(id)) {
+        // Use name from position payload if available, otherwise look up in lobbyData
+        const name = pos.name || (lobbyData.players || []).find(p => p.id === id)?.name || 'Player';
+        addPlayer(id, name, pos);
+      }
     }
   });
 
@@ -416,6 +686,10 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     lobbyData = lobby;
     sessionStorage.setItem('lobbyData', JSON.stringify(lobby));
     updateHUD();
+  });
+
+  socket.on('game_chat_message', (msg) => {
+    addGameChatMessage(msg);
   });
 
   // ── HUD ───────────────────────────────────────────────────────────────────
@@ -441,6 +715,8 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
+    weaponCamera.aspect = window.innerWidth / window.innerHeight;
+    weaponCamera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
