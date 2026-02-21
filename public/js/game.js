@@ -292,11 +292,11 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
   const fbxLoader = new FBXLoader();
   let weaponMixer = null;
-  // Container placed at lower-right – proper rifle hold position
+  // Container: stock rests in bottom-right corner, barrel extends toward center
   const gunContainer = new THREE.Group();
-  gunContainer.position.set(0.09, -0.07, -0.22);
-  // Tilt: slight X (barrel level), slight Y inward, slight Z roll
-  gunContainer.rotation.set(0.05, -0.06, 0.04);
+  gunContainer.position.set(0.18, -0.13, -0.22);
+  // Slight downward tilt so barrel aims toward crosshair
+  gunContainer.rotation.set(0.08, -0.05, 0.04);
   weaponScene.add(gunContainer);
 
   fbxLoader.load(
@@ -316,8 +316,9 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
       const center = scaledBox.getCenter(new THREE.Vector3());
       fbx.position.sub(center);
 
-      // 60° Y rotation only (no Y-flip): butt faces camera, barrel points into scene.
-      fbx.rotation.set(0, Math.PI / 3, 0);
+      // 120° Y rotation: barrel points forward-left toward crosshair;
+      // stock/butt sits in the bottom-right corner facing slightly left.
+      fbx.rotation.set(0, 2 * Math.PI / 3, 0);
 
       // Load the actual PNG texture (FBX references TGA which isn't supported)
       const texLoader = new THREE.TextureLoader();
@@ -597,8 +598,8 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
       const bobFreq = isMoving ? 7 : 1.5;
       const bobY   = isMoving ? 0.007 : 0.002;
       const bobX   = isMoving ? 0.003 : 0.001;
-      gunContainer.position.y = -0.07 + Math.sin(elapsed * bobFreq) * bobY;
-      gunContainer.position.x =  0.09 + Math.sin(elapsed * bobFreq * 0.5) * bobX;
+      gunContainer.position.y = -0.13 + Math.sin(elapsed * bobFreq) * bobY;
+      gunContainer.position.x =  0.18 + Math.sin(elapsed * bobFreq * 0.5) * bobX;
     }
 
     // Chunk update (every 500ms)
