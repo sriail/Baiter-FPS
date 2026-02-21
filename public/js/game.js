@@ -302,15 +302,12 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
   fbxLoader.load(
     '/weapons/gun-m4a1/source/Gun_M41D.fbx',
     (fbx) => {
-      // Normalise scale using the longest axis (barrel depth) to 0.55 world units.
-      // The barrel points into the screen (-Z) so 0.55 units of depth is not
-      // obtrusive, while the cross-section (height/width ≈ 12 % of length)
-      // becomes ~0.066 units – about 24 % of the weapon-camera screen height.
+      // Normalise scale: fit longest axis to 0.38 world units (slightly smaller rifle hold)
       const bbox = new THREE.Box3().setFromObject(fbx);
       const bsize = bbox.getSize(new THREE.Vector3());
       const maxDim = Math.max(bsize.x, bsize.y, bsize.z);
       if (maxDim <= 0) { console.warn('Gun model has zero size'); return; }
-      const targetLen = 0.55; // gun barrel length in weapon-scene units
+      const targetLen = 0.38; // gun barrel length in weapon-scene units
       const scale = targetLen / maxDim;
       fbx.scale.setScalar(scale);
 
@@ -319,8 +316,9 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
       const center = scaledBox.getCenter(new THREE.Vector3());
       fbx.position.sub(center);
 
-      // Barrel forward (-Z), gun right-side up
-      fbx.rotation.set(0, Math.PI, 0);
+      // Y-flip (barrel faces forward) then -90° Z roll (clockwise when viewed from right)
+      // so the ejection port faces down – natural first-person rifle hold orientation
+      fbx.rotation.set(0, Math.PI, -Math.PI / 2);
 
       // Load the actual PNG texture (FBX references TGA which isn't supported)
       const texLoader = new THREE.TextureLoader();
@@ -483,12 +481,14 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
   const _downOrigin = new THREE.Vector3();
   const _downDir = new THREE.Vector3(0, -1, 0);
+  const _wallDir = new THREE.Vector3(); // reused each frame – avoids per-frame alloc
   const _raycasterDown = new THREE.Raycaster();
   const _raycasterWall = new THREE.Raycaster();
   const _tmpPos = new THREE.Vector3(); // reused for world position fallback
+  const _nearbyCache = []; // reused result array – avoids per-frame alloc
 
   function getNearbyColliders() {
-    const result = [];
+    _nearbyCache.length = 0;
     const px = camera.position.x, py = camera.position.y, pz = camera.position.z;
     for (let i = 0; i < collisionObjects.length; i++) {
       const obj = collisionObjects[i];
@@ -498,9 +498,9 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
         ? obj.userData.cachedWorldPos
         : obj.getWorldPosition(_tmpPos);
       const dx = wp.x - px, dy = wp.y - py, dz = wp.z - pz;
-      if (dx * dx + dy * dy + dz * dz < COLLISION_CHECK_RADIUS_SQ) result.push(obj);
+      if (dx * dx + dy * dy + dz * dz < COLLISION_CHECK_RADIUS_SQ) _nearbyCache.push(obj);
     }
-    return result;
+    return _nearbyCache;
   }
 
   // ── Animation Loop ────────────────────────────────────────────────────────
@@ -539,9 +539,10 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
       const nearbyColliders = getNearbyColliders();
 
-      // Wall check
+      // Wall check (reuse _wallDir to avoid per-frame allocation)
       if (len > 0) {
-        _raycasterWall.set(camera.position, new THREE.Vector3(moveX, 0, moveZ).normalize());
+        _wallDir.set(moveX, 0, moveZ).normalize();
+        _raycasterWall.set(camera.position, _wallDir);
         _raycasterWall.far = 0.055;
         const wallHits = _raycasterWall.intersectObjects(nearbyColliders, true);
         if (wallHits.length === 0) {
