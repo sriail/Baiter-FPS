@@ -316,11 +316,9 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
       const center = scaledBox.getCenter(new THREE.Vector3());
       fbx.position.sub(center);
 
-      // Y-flip (faces the correct direction) + 90° clockwise X rotation
-      // (viewed from +X axis) so the barrel tips forward into the screen along -Z.
-      // The FBX barrel axis is Y; -Math.PI/2 on X rotates the top away from the
-      // camera, pointing the barrel into the scene.
-      fbx.rotation.set(-Math.PI / 2, Math.PI, 0);
+      // Y-flip (Math.PI) puts butt toward camera; +60° on Y angled inward
+      // for a natural FPS rifle hold with stock facing the player.
+      fbx.rotation.set(0, Math.PI + Math.PI / 3, 0);
 
       // Load the actual PNG texture (FBX references TGA which isn't supported)
       const texLoader = new THREE.TextureLoader();
