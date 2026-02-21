@@ -19,28 +19,18 @@
         <button class="btn-link" onclick="changeNamePrompt()">change</button>
       </div>
       <div class="home-buttons">
-        <button class="btn btn-primary" onclick="openCreateModal()">CREATE LOBBY</button>
+        <button class="btn btn-primary" onclick="openCreateModal()">CREATE PARTY</button>
         <button class="btn" onclick="openCodeModal()">ENTER CODE</button>
         <button class="btn" onclick="quickPlay()">PLAY</button>
       </div>
     </div>
   </div>
 
-  <!-- Create Lobby Modal -->
+  <!-- Create Party Modal -->
   <div id="create-modal" class="modal" style="display:none;">
     <div class="modal-box">
-      <h2 class="modal-title">CREATE LOBBY</h2>
-      <div class="form-group">
-        <label class="form-label">VISIBILITY</label>
-        <div class="toggle-row">
-          <span>Private</span>
-          <label class="toggle">
-            <input type="checkbox" id="create-public-toggle">
-            <span class="toggle-slider"></span>
-          </label>
-          <span>Public</span>
-        </div>
-      </div>
+      <h2 class="modal-title">CREATE PARTY</h2>
+      <p style="color:#666;font-size:0.8rem;letter-spacing:2px;text-align:center;margin-bottom:8px;">Share the party code with friends to invite them.</p>
       <div class="modal-buttons">
         <button class="btn btn-primary" onclick="doCreateLobby()">CREATE</button>
         <button class="btn" onclick="closeModals()">CANCEL</button>
@@ -51,7 +41,7 @@
   <!-- Enter Code Modal -->
   <div id="code-modal" class="modal" style="display:none;">
     <div class="modal-box">
-      <h2 class="modal-title">ENTER LOBBY CODE</h2>
+      <h2 class="modal-title">JOIN PARTY</h2>
       <div class="code-input-row">
         <input type="text" id="code-input" class="code-input" placeholder="000000" maxlength="6" oninput="this.value=this.value.replace(/\D/g,'')">
         <button class="btn-icon" onclick="pasteCode()" title="Paste code">⧉</button>
@@ -64,15 +54,15 @@
     </div>
   </div>
 
-  <!-- Lobby Screen -->
+  <!-- Party Screen -->
   <div id="lobby-screen" class="screen" style="display:none;">
     <div class="lobby-header">
       <span class="lobby-title">BaiterFPS</span>
       <div class="lobby-code-block">
-        <span class="label">LOBBY CODE</span>
+        <span class="label">PARTY CODE</span>
         <span id="lobby-code-display" class="lobby-code-value">------</span>
         <button class="btn-icon" onclick="copyCode()" title="Copy code">⧉</button>
-        <button class="btn-icon" onclick="copyLink()" title="Copy lobby link">🔗</button>
+        <button class="btn-icon" onclick="copyLink()" title="Copy party link">🔗</button>
       </div>
     </div>
     <div class="lobby-body">
@@ -92,17 +82,6 @@
             <div class="map-desc">Urban close-quarters combat</div>
           </div>
         </div>
-        <div class="visibility-row" id="visibility-row" style="display:none;">
-          <span class="label">VISIBILITY</span>
-          <div class="toggle-row">
-            <span>Private</span>
-            <label class="toggle">
-              <input type="checkbox" id="lobby-public-toggle" onchange="setVisibility(this.checked)">
-              <span class="toggle-slider"></span>
-            </label>
-            <span>Public</span>
-          </div>
-        </div>
         <div id="start-area" class="start-area">
           <button id="start-btn" class="btn btn-primary start-btn" onclick="startGame()" style="display:none;">START GAME</button>
           <p id="waiting-text" class="waiting-text" style="display:none;">Waiting for host to start...</p>
@@ -119,7 +98,7 @@
       </div>
     </div>
     <div class="lobby-footer">
-      <button class="btn btn-danger-outline" onclick="leaveLobby()">LEAVE LOBBY</button>
+      <button class="btn btn-danger-outline" onclick="leaveLobby()">LEAVE PARTY</button>
     </div>
   </div>
 

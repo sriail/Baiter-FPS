@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
 (function() {
   'use strict';
@@ -9,6 +10,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
   const socket = io();
   const playerName = sessionStorage.getItem('playerName') || 'Player';
   const lobbyCode = sessionStorage.getItem('lobbyCode') || '';
+  const rejoinToken = sessionStorage.getItem('rejoinToken') || '';
   let lobbyData = JSON.parse(sessionStorage.getItem('lobbyData') || '{}');
 
   // ── Three.js Setup ────────────────────────────────────────────────────────
@@ -18,7 +20,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
   scene.fog = new THREE.Fog(0x87ceeb, 80, 220);
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
-  camera.position.set(0, 3, 0);
+  camera.position.set(0, 0.3, 0);
 
   const renderer = new THREE.WebGLRenderer({ antialias: false });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -27,12 +29,23 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
   document.body.appendChild(renderer.domElement);
   renderer.domElement.id = 'game-canvas';
 
+  // Weapon scene rendered on top (prevents clipping through walls)
+  const weaponScene = new THREE.Scene();
+  const weaponCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.001, 10);
+  renderer.autoClear = false;
+
   // Lights
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
   scene.add(ambientLight);
   const dirLight = new THREE.DirectionalLight(0xfffde7, 0.9);
   dirLight.position.set(60, 120, 60);
   scene.add(dirLight);
+
+  // Weapon lights (mirrored for weapon scene)
+  weaponScene.add(new THREE.AmbientLight(0xffffff, 0.9));
+  const wDirLight = new THREE.DirectionalLight(0xfffde7, 0.8);
+  wDirLight.position.set(1, 2, 1);
+  weaponScene.add(wDirLight);
 
   // ── Player State ──────────────────────────────────────────────────────────
 
@@ -44,16 +57,16 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
   let isPaused = false;
   let isPointerLocked = false;
 
-  const GRAVITY = -22;
-  const PLAYER_SPEED = 9;
-  const JUMP_FORCE = 9;
-  const PLAYER_HEIGHT = 1.8;
-  const MIN_WORLD_HEIGHT = -80;
+  // Player scaled to 1/10 of original size to match map scale
+  const GRAVITY = -2.2;
+  const PLAYER_SPEED = 0.9;
+  const JUMP_FORCE = 0.9;
+  const PLAYER_HEIGHT = 0.18;
+  const MIN_WORLD_HEIGHT = -8;
 
   // ── Other Players ─────────────────────────────────────────────────────────
 
-  const otherPlayers = new Map(); // id -> { mesh, targetPos, nameSprite }
-  const playerGeo = new THREE.BoxGeometry(0.6, 1.8, 0.6);
+  const otherPlayers = new Map(); // id -> { mesh, targetPos }
   const playerColors = [0x4fc3f7, 0xff6b6b, 0x6bff6b, 0xffff6b, 0xff6bff, 0x6bffff, 0xff9f43, 0xa29bfe];
   let colorIndex = 0;
 
@@ -61,8 +74,8 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
   const collisionObjects = [];
   const CHUNK_SIZE = 50;
-  const RENDER_DISTANCE = 3;
-  const COLLISION_CHECK_RADIUS_SQ = 400; // 20 units squared
+  const RENDER_DISTANCE = 2;
+  const COLLISION_CHECK_RADIUS_SQ = 25; // 5 units radius (optimized for 1/10 player scale)
   const chunks = new Map();
   let lastChunkX = Infinity, lastChunkZ = Infinity;
 
@@ -164,9 +177,11 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
         child.castShadow = false;
         child.receiveShadow = false;
 
-        // Assign to spatial chunk
+        // Cache world position for fast collision checks
         const pos = new THREE.Vector3();
         child.getWorldPosition(pos);
+        child.userData.cachedWorldPos = pos.clone();
+
         const cx = Math.floor(pos.x / CHUNK_SIZE);
         const cz = Math.floor(pos.z / CHUNK_SIZE);
         const key = cx + ',' + cz;
@@ -215,6 +230,66 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     }
   }
 
+  // ── Gun Model Loading ─────────────────────────────────────────────────────
+
+  const fbxLoader = new FBXLoader();
+  let weaponMixer = null;
+  const gunContainer = new THREE.Group();
+  // Position: right side, slightly forward and down from eye level
+  gunContainer.position.set(0.15, -0.1, -0.3);
+  weaponScene.add(gunContainer);
+
+  fbxLoader.load(
+    '/weapons/gun-m4a1/source/Gun_M41D.fbx',
+    (fbx) => {
+      // Scale gun to fit first-person view
+      fbx.scale.setScalar(0.001);
+      // Rotate so barrel points forward (-Z)
+      fbx.rotation.set(0, Math.PI, 0);
+
+      // Load the actual PNG texture (FBX references TGA which isn't supported)
+      const texLoader = new THREE.TextureLoader();
+      texLoader.load(
+        '/weapons/gun-m4a1/textures/M4_D.png',
+        (tex) => {
+          const mat = new THREE.MeshLambertMaterial({ map: tex });
+          fbx.traverse((child) => {
+            if (child.isMesh) {
+              child.material = mat;
+              child.castShadow = false;
+              child.receiveShadow = false;
+            }
+          });
+        },
+        null,
+        () => {
+          // Fallback material if texture fails
+          const metalMat = new THREE.MeshLambertMaterial({ color: 0x444444 });
+          fbx.traverse((child) => {
+            if (child.isMesh) {
+              child.material = metalMat;
+              child.castShadow = false;
+              child.receiveShadow = false;
+            }
+          });
+        }
+      );
+
+      gunContainer.add(fbx);
+
+      // Set up animation mixer if FBX has animations
+      if (fbx.animations && fbx.animations.length > 0) {
+        weaponMixer = new THREE.AnimationMixer(fbx);
+        const idleClip = fbx.animations[0];
+        const action = weaponMixer.clipAction(idleClip);
+        action.play();
+      }
+      console.log('Gun model loaded');
+    },
+    null,
+    (err) => console.warn('Gun load failed:', err)
+  );
+
   // ── Chunk Visibility ──────────────────────────────────────────────────────
 
   function updateChunkVisibility(force) {
@@ -249,17 +324,54 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     const tex = new THREE.CanvasTexture(canvas);
     const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
     const sprite = new THREE.Sprite(mat);
-    sprite.position.set(0, 1.4, 0);
-    sprite.scale.set(2.2, 0.55, 1);
+    sprite.position.set(0, 0.14, 0);
+    sprite.scale.set(0.5, 0.13, 1);
     return sprite;
+  }
+
+  function createPlayerMesh(color) {
+    const group = new THREE.Group();
+    const mat = new THREE.MeshLambertMaterial({ color });
+    // Compute a darker version of the color by scaling each RGB channel
+    const r = ((color >> 16) & 0xff) * 0.7 | 0;
+    const g = ((color >> 8) & 0xff) * 0.7 | 0;
+    const b = (color & 0xff) * 0.7 | 0;
+    const darkColor = (r << 16) | (g << 8) | b;
+    const darkMat = new THREE.MeshLambertMaterial({ color: darkColor });
+    const s = 0.1; // 1/10 scale factor
+    // Body
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.6 * s, 0.7 * s, 0.3 * s), mat);
+    body.position.y = 0.85 * s;
+    group.add(body);
+    // Head
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.4 * s, 0.35 * s, 0.35 * s), mat);
+    head.position.y = 1.42 * s;
+    group.add(head);
+    // Left arm
+    const lArm = new THREE.Mesh(new THREE.BoxGeometry(0.2 * s, 0.6 * s, 0.2 * s), mat);
+    lArm.position.set(-0.4 * s, 0.85 * s, 0);
+    group.add(lArm);
+    // Right arm
+    const rArm = new THREE.Mesh(new THREE.BoxGeometry(0.2 * s, 0.6 * s, 0.2 * s), mat);
+    rArm.position.set(0.4 * s, 0.85 * s, 0);
+    group.add(rArm);
+    // Left leg
+    const lLeg = new THREE.Mesh(new THREE.BoxGeometry(0.25 * s, 0.6 * s, 0.25 * s), darkMat);
+    lLeg.position.set(-0.17 * s, 0.3 * s, 0);
+    group.add(lLeg);
+    // Right leg
+    const rLeg = new THREE.Mesh(new THREE.BoxGeometry(0.25 * s, 0.6 * s, 0.25 * s), darkMat);
+    rLeg.position.set(0.17 * s, 0.3 * s, 0);
+    group.add(rLeg);
+    return group;
   }
 
   function addPlayer(id, name, pos) {
     if (otherPlayers.has(id)) return;
     const color = playerColors[colorIndex++ % playerColors.length];
-    const mat = new THREE.MeshLambertMaterial({ color });
-    const mesh = new THREE.Mesh(playerGeo, mat);
-    mesh.position.set(pos.x || 0, (pos.y || 2) - 0.9, pos.z || 0);
+    const mesh = createPlayerMesh(color);
+    const yOffset = PLAYER_HEIGHT * 0.5;
+    mesh.position.set(pos.x || 0, (pos.y || PLAYER_HEIGHT) - yOffset, pos.z || 0);
     const sprite = makeNameSprite(name || 'Player');
     mesh.add(sprite);
     scene.add(mesh);
@@ -277,6 +389,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
   const _downDir = new THREE.Vector3(0, -1, 0);
   const _raycasterDown = new THREE.Raycaster();
   const _raycasterWall = new THREE.Raycaster();
+  const _tmpPos = new THREE.Vector3(); // reused for world position fallback
 
   function getNearbyColliders() {
     const result = [];
@@ -284,8 +397,11 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     for (let i = 0; i < collisionObjects.length; i++) {
       const obj = collisionObjects[i];
       if (!obj.visible) continue;
-      const op = obj.position;
-      const dx = op.x - px, dy = op.y - py, dz = op.z - pz;
+      // Use cached world position for fast distance check
+      const wp = obj.userData.cachedWorldPos
+        ? obj.userData.cachedWorldPos
+        : obj.getWorldPosition(_tmpPos);
+      const dx = wp.x - px, dy = wp.y - py, dz = wp.z - pz;
       if (dx * dx + dy * dy + dz * dz < COLLISION_CHECK_RADIUS_SQ) result.push(obj);
     }
     return result;
@@ -330,7 +446,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
       // Wall check
       if (len > 0) {
         _raycasterWall.set(camera.position, new THREE.Vector3(moveX, 0, moveZ).normalize());
-        _raycasterWall.far = 0.55;
+        _raycasterWall.far = 0.055;
         const wallHits = _raycasterWall.intersectObjects(nearbyColliders, true);
         if (wallHits.length === 0) {
           camera.position.x += moveX * spd;
@@ -342,9 +458,9 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
       camera.position.y += velocity.y * delta;
 
       // Ground check
-      _downOrigin.set(camera.position.x, camera.position.y - 0.1, camera.position.z);
+      _downOrigin.set(camera.position.x, camera.position.y - 0.01, camera.position.z);
       _raycasterDown.set(_downOrigin, _downDir);
-      _raycasterDown.far = PLAYER_HEIGHT + 0.3;
+      _raycasterDown.far = PLAYER_HEIGHT + 0.03;
       const groundHits = _raycasterDown.intersectObjects(nearbyColliders, true);
       if (groundHits.length > 0 && velocity.y <= 0) {
         camera.position.y = groundHits[0].point.y + PLAYER_HEIGHT;
@@ -365,6 +481,9 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
       p.mesh.position.lerp(p.targetPos, 0.18);
     });
 
+    // Update weapon animations
+    if (weaponMixer) weaponMixer.update(delta);
+
     // Chunk update (every 500ms)
     if (now - lastChunkCheck > 500) {
       updateChunkVisibility(false);
@@ -383,13 +502,22 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
       lastMoveEmit = now;
     }
 
+    renderer.clear();
     renderer.render(scene, camera);
+    // Render weapon on top
+    renderer.clearDepth();
+    weaponCamera.quaternion.copy(camera.quaternion);
+    renderer.render(weaponScene, weaponCamera);
   }
 
   // ── Socket Events ─────────────────────────────────────────────────────────
 
   socket.on('connect', () => {
     console.log('Game socket connected:', socket.id);
+    // Rejoin the lobby room (new socket ID after page navigation)
+    if (lobbyCode) {
+      socket.emit('rejoin_game', { lobbyCode, playerName, rejoinToken });
+    }
     updateHUD();
   });
 
@@ -402,8 +530,32 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     }
     const p = otherPlayers.get(data.id);
     if (p) {
-      p.targetPos.set(data.x, data.y - 0.9, data.z);
+      p.targetPos.set(data.x, data.y - PLAYER_HEIGHT * 0.5, data.z);
       p.mesh.rotation.y = data.rotY || 0;
+    }
+  });
+
+  // Server asks this client to resend position (new player joined)
+  socket.on('resync_request', () => {
+    socket.emit('player_move', {
+      x: camera.position.x,
+      y: camera.position.y,
+      z: camera.position.z,
+      rotY: euler.y,
+      rotX: euler.x
+    });
+  });
+
+  // Server sends existing player positions when we rejoin
+  // Format: { socketId: {x,y,z,rotY,rotX,name} }
+  socket.on('sync_positions', (positions) => {
+    for (const [id, pos] of Object.entries(positions)) {
+      if (id === socket.id) continue;
+      if (!otherPlayers.has(id)) {
+        // Use name from position payload if available, otherwise look up in lobbyData
+        const name = pos.name || (lobbyData.players || []).find(p => p.id === id)?.name || 'Player';
+        addPlayer(id, name, pos);
+      }
     }
   });
 
@@ -441,6 +593,8 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
+    weaponCamera.aspect = window.innerWidth / window.innerHeight;
+    weaponCamera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
