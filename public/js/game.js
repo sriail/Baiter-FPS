@@ -89,8 +89,8 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
   document.addEventListener('pointerlockchange', () => {
     isPointerLocked = document.pointerLockElement === renderer.domElement;
-    document.getElementById('crosshair').style.display = isPointerLocked ? 'block' : 'none';
-    document.getElementById('lock-prompt').style.display = isPointerLocked ? 'none' : 'block';
+    document.getElementById('crosshair').style.color = isPointerLocked
+      ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.3)';
   });
 
   document.addEventListener('mousemove', (e) => {
@@ -102,10 +102,68 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
     camera.quaternion.setFromEuler(euler);
   });
 
+  // ── In-game Chat ──────────────────────────────────────────────────────────
+
+  let chatOpen = false;
+
+  function openChat() {
+    if (chatOpen) return;
+    chatOpen = true;
+    if (isPointerLocked) document.exitPointerLock();
+    document.getElementById('game-chat-input-row').style.display = 'flex';
+    document.getElementById('game-chat-hint').style.display = 'none';
+    // Small delay to allow DOM to settle before focusing the input
+    setTimeout(() => document.getElementById('game-chat-input').focus(), 30);
+  }
+
+  function closeChat() {
+    if (!chatOpen) return;
+    chatOpen = false;
+    document.getElementById('game-chat-input').value = '';
+    document.getElementById('game-chat-input-row').style.display = 'none';
+    document.getElementById('game-chat-hint').style.display = '';
+    if (!isPaused && mapLoaded) renderer.domElement.requestPointerLock();
+  }
+
+  function sendGameChat() {
+    const input = document.getElementById('game-chat-input');
+    const text = input.value.trim();
+    if (text) socket.emit('game_chat_message', { text });
+    closeChat();
+  }
+
+  function addGameChatMessage(msg) {
+    const box = document.getElementById('game-chat-messages');
+    if (!box) return;
+    const div = document.createElement('div');
+    div.className = 'game-chat-msg' + (msg.system ? ' system' : '');
+    if (msg.system) {
+      div.textContent = msg.text;
+    } else {
+      const sender = document.createElement('span');
+      sender.className = 'msg-sender';
+      sender.textContent = (msg.sender || 'Player') + ': ';
+      div.appendChild(sender);
+      div.appendChild(document.createTextNode(msg.text || ''));
+    }
+    box.appendChild(div);
+    // Keep max 20 messages visible
+    while (box.children.length > 20) box.removeChild(box.firstChild);
+    // Fade out after 8 seconds, remove after 10
+    setTimeout(() => div.classList.add('fade'), 8000);
+    setTimeout(() => { if (div.parentNode) div.remove(); }, 10000);
+  }
+
   // ── Keyboard ──────────────────────────────────────────────────────────────
 
   document.addEventListener('keydown', (e) => {
+    if (chatOpen) {
+      if (e.code === 'Enter') { e.preventDefault(); sendGameChat(); }
+      if (e.code === 'Escape') { e.preventDefault(); closeChat(); }
+      return; // swallow all other keys while chat is open
+    }
     keys[e.code] = true;
+    if (e.code === 'KeyT' && !isPaused) { e.preventDefault(); openChat(); }
     if (e.code === 'Space' && canJump) {
       velocity.y = JUMP_FORCE;
       canJump = false;
@@ -234,17 +292,31 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
   const fbxLoader = new FBXLoader();
   let weaponMixer = null;
+  // Container placed at lower-right of view – mimics a proper rifle hold
   const gunContainer = new THREE.Group();
-  // Position: right side, slightly forward and down from eye level
-  gunContainer.position.set(0.15, -0.1, -0.3);
+  gunContainer.position.set(0.06, -0.13, -0.28);
+  // Slight inward tilt so barrel aims straight ahead
+  gunContainer.rotation.set(0, 0, 0);
   weaponScene.add(gunContainer);
 
   fbxLoader.load(
     '/weapons/gun-m4a1/source/Gun_M41D.fbx',
     (fbx) => {
-      // Scale gun to fit first-person view
-      fbx.scale.setScalar(0.001);
-      // Rotate so barrel points forward (-Z)
+      // Normalise scale: compute bounding box and fit the longest axis to 0.12 units
+      const bbox = new THREE.Box3().setFromObject(fbx);
+      const bsize = bbox.getSize(new THREE.Vector3());
+      const maxDim = Math.max(bsize.x, bsize.y, bsize.z);
+      if (maxDim <= 0) { console.warn('Gun model has zero size'); return; }
+      const targetLen = 0.12; // gun length in weapon-scene units
+      const scale = targetLen / maxDim;
+      fbx.scale.setScalar(scale);
+
+      // Recompute world box after scaling to centre the model at container origin
+      const scaledBox = new THREE.Box3().setFromObject(fbx);
+      const center = scaledBox.getCenter(new THREE.Vector3());
+      fbx.position.sub(center); // pivot moves to model centre
+
+      // Rotate so barrel points forward (-Z) and gun is right-side up
       fbx.rotation.set(0, Math.PI, 0);
 
       // Load the actual PNG texture (FBX references TGA which isn't supported)
@@ -280,8 +352,7 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
       // Set up animation mixer if FBX has animations
       if (fbx.animations && fbx.animations.length > 0) {
         weaponMixer = new THREE.AnimationMixer(fbx);
-        const idleClip = fbx.animations[0];
-        const action = weaponMixer.clipAction(idleClip);
+        const action = weaponMixer.clipAction(fbx.animations[0]);
         action.play();
       }
       console.log('Gun model loaded');
@@ -568,6 +639,10 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
     lobbyData = lobby;
     sessionStorage.setItem('lobbyData', JSON.stringify(lobby));
     updateHUD();
+  });
+
+  socket.on('game_chat_message', (msg) => {
+    addGameChatMessage(msg);
   });
 
   // ── HUD ───────────────────────────────────────────────────────────────────

@@ -116,9 +116,11 @@ io.on('connection', (socket) => {
         lobby.gameStarted = true;
         io.to(lobby.id).emit('game_start', { map: lobby.map, players: lobby.players, lobbyId: lobby.id, code: lobby.code });
       } else {
-        // Game already running - send new player straight to game
+        // Game already running - send new player straight to game, announce to others
         socket.emit('game_start', { map: lobby.map, players: lobby.players, lobbyId: lobby.id, code: lobby.code });
         io.to(lobby.id).emit('lobby_update', serializeLobby(lobby));
+        const joinMsg = { system: true, text: `${name} joined the game`, timestamp: Date.now() };
+        io.to(lobby.id).emit('game_chat_message', joinMsg);
       }
       return;
     }
@@ -181,6 +183,7 @@ io.on('connection', (socket) => {
     if (!existing) {
       existing = lobby.players.find(p => p.name === (playerName || 'Player') && !p.rejoinToken);
     }
+    const isNewPlayer = !existing;
     if (existing) {
       // Remove old socket mapping if different
       if (existing.id !== socket.id) {
@@ -203,6 +206,24 @@ io.on('connection', (socket) => {
     // Tell others to resend their positions
     socket.to(lobby.id).emit('resync_request');
     io.to(lobby.id).emit('lobby_update', serializeLobby(lobby));
+    // Announce new player joining to everyone in the game
+    if (isNewPlayer) {
+      const name = playerName || 'Player';
+      const joinMsg = { system: true, text: `${name} joined the game`, timestamp: Date.now() };
+      io.to(lobby.id).emit('game_chat_message', joinMsg);
+    }
+  });
+
+  socket.on('game_chat_message', ({ text }) => {
+    const lobbyId = playerToLobby.get(socket.id);
+    if (!lobbyId) return;
+    const lobby = lobbies.get(lobbyId);
+    if (!lobby) return;
+    const name = getPlayerName(lobby, socket.id);
+    const msg = { system: false, sender: name, text: String(text).slice(0, 200), timestamp: Date.now() };
+    lobby.chat.push(msg);
+    if (lobby.chat.length > 100) lobby.chat.shift();
+    io.to(lobbyId).emit('game_chat_message', msg);
   });
 
   socket.on('leave_lobby', () => {
@@ -241,6 +262,8 @@ io.on('connection', (socket) => {
     const msg = { system: true, text: `${playerName} left the lobby`, timestamp: Date.now() };
     lobby.chat.push(msg);
     io.to(lobbyId).emit('chat_message', msg);
+    // Also announce in-game chat
+    io.to(lobbyId).emit('game_chat_message', { system: true, text: `${playerName} left the game`, timestamp: Date.now() });
     io.to(lobbyId).emit('lobby_update', serializeLobby(lobby));
     io.to(lobbyId).emit('player_left', { id: socket.id });
   }

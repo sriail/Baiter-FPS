@@ -41,13 +41,44 @@
       pointer-events: none; line-height: 1;
       text-shadow: 0 0 4px rgba(0,0,0,0.9);
     }
-    #lock-prompt {
-      position: fixed; top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      color: #888; font-family: monospace;
-      font-size: 0.9rem; letter-spacing: 3px;
-      z-index: 10; pointer-events: none;
-      text-align: center;
+    /* In-game chat */
+    #game-chat {
+      position: fixed; bottom: 20px; left: 12px;
+      width: 340px; z-index: 20;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    #game-chat-messages {
+      display: flex; flex-direction: column; gap: 3px;
+      max-height: 160px; overflow: hidden;
+      mask-image: linear-gradient(to bottom, transparent 0%, black 30%);
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 30%);
+    }
+    .game-chat-msg {
+      font-family: monospace; font-size: 12px; letter-spacing: 0.5px;
+      background: rgba(0,0,0,0.55); padding: 3px 7px;
+      color: #ccc; width: fit-content; max-width: 100%;
+      word-break: break-word; line-height: 1.4;
+      transition: opacity 2s;
+    }
+    .game-chat-msg.system { color: #888; font-style: italic; }
+    .game-chat-msg .msg-sender { color: #4fc3f7; }
+    .game-chat-msg.fade { opacity: 0; }
+    #game-chat-input-row {
+      display: none; align-items: center; gap: 6px; margin-top: 4px;
+      pointer-events: all;
+    }
+    #game-chat-input {
+      flex: 1; background: rgba(0,0,0,0.75); border: 1px solid #4fc3f7;
+      color: #fff; font-family: monospace; font-size: 12px; padding: 5px 8px;
+      outline: none; letter-spacing: 1px;
+    }
+    #game-chat-enter-hint {
+      color: #555; font-family: monospace; font-size: 10px; letter-spacing: 1px;
+      white-space: nowrap; pointer-events: none;
+    }
+    #game-chat-hint {
+      color: #444; font-family: monospace; font-size: 10px; letter-spacing: 2px;
+      pointer-events: none; margin-top: 4px;
     }
   </style>
 </head>
@@ -70,8 +101,17 @@
   </div>
 
   <div id="hud"></div>
-  <div id="crosshair" style="display:none;">+</div>
-  <div id="lock-prompt">CLICK TO PLAY</div>
+  <div id="crosshair">+</div>
+
+  <!-- In-game chat overlay -->
+  <div id="game-chat">
+    <div id="game-chat-messages"></div>
+    <div id="game-chat-input-row">
+      <input type="text" id="game-chat-input" placeholder="Message..." maxlength="200" autocomplete="off">
+      <span id="game-chat-enter-hint">[ESC] CLOSE</span>
+    </div>
+    <span id="game-chat-hint">[T] CHAT</span>
+  </div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script type="importmap">
