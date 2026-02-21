@@ -316,9 +316,11 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
       const center = scaledBox.getCenter(new THREE.Vector3());
       fbx.position.sub(center);
 
-      // Y-flip (barrel faces forward) then -90° Z roll (clockwise when viewed from right)
-      // so the ejection port faces down – natural first-person rifle hold orientation
-      fbx.rotation.set(0, Math.PI, -Math.PI / 2);
+      // Y-flip (faces the correct direction) + 90° clockwise X rotation
+      // (viewed from +X axis) so the barrel tips forward into the screen along -Z.
+      // The FBX barrel axis is Y; -Math.PI/2 on X rotates the top away from the
+      // camera, pointing the barrel into the scene.
+      fbx.rotation.set(-Math.PI / 2, Math.PI, 0);
 
       // Load the actual PNG texture (FBX references TGA which isn't supported)
       const texLoader = new THREE.TextureLoader();
