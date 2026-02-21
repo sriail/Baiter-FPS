@@ -292,31 +292,34 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
   const fbxLoader = new FBXLoader();
   let weaponMixer = null;
-  // Container placed at lower-right of view – mimics a proper rifle hold
+  // Container placed at lower-right – proper rifle hold position
   const gunContainer = new THREE.Group();
-  gunContainer.position.set(0.06, -0.13, -0.28);
-  // Slight inward tilt so barrel aims straight ahead
-  gunContainer.rotation.set(0, 0, 0);
+  gunContainer.position.set(0.09, -0.07, -0.22);
+  // Tilt: slight X (barrel level), slight Y inward, slight Z roll
+  gunContainer.rotation.set(0.05, -0.06, 0.04);
   weaponScene.add(gunContainer);
 
   fbxLoader.load(
     '/weapons/gun-m4a1/source/Gun_M41D.fbx',
     (fbx) => {
-      // Normalise scale: compute bounding box and fit the longest axis to 0.12 units
+      // Normalise scale using the longest axis (barrel depth) to 0.55 world units.
+      // The barrel points into the screen (-Z) so 0.55 units of depth is not
+      // obtrusive, while the cross-section (height/width ≈ 12 % of length)
+      // becomes ~0.066 units – about 24 % of the weapon-camera screen height.
       const bbox = new THREE.Box3().setFromObject(fbx);
       const bsize = bbox.getSize(new THREE.Vector3());
       const maxDim = Math.max(bsize.x, bsize.y, bsize.z);
       if (maxDim <= 0) { console.warn('Gun model has zero size'); return; }
-      const targetLen = 0.12; // gun length in weapon-scene units
+      const targetLen = 0.55; // gun barrel length in weapon-scene units
       const scale = targetLen / maxDim;
       fbx.scale.setScalar(scale);
 
-      // Recompute world box after scaling to centre the model at container origin
+      // Centre pivot so the model sits at the container origin
       const scaledBox = new THREE.Box3().setFromObject(fbx);
       const center = scaledBox.getCenter(new THREE.Vector3());
-      fbx.position.sub(center); // pivot moves to model centre
+      fbx.position.sub(center);
 
-      // Rotate so barrel points forward (-Z) and gun is right-side up
+      // Barrel forward (-Z), gun right-side up
       fbx.rotation.set(0, Math.PI, 0);
 
       // Load the actual PNG texture (FBX references TGA which isn't supported)
@@ -335,7 +338,6 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
         },
         null,
         () => {
-          // Fallback material if texture fails
           const metalMat = new THREE.MeshLambertMaterial({ color: 0x444444 });
           fbx.traverse((child) => {
             if (child.isMesh) {
@@ -403,13 +405,14 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
   function createPlayerMesh(color) {
     const group = new THREE.Group();
     const mat = new THREE.MeshLambertMaterial({ color });
-    // Compute a darker version of the color by scaling each RGB channel
     const r = ((color >> 16) & 0xff) * 0.7 | 0;
     const g = ((color >> 8) & 0xff) * 0.7 | 0;
     const b = (color & 0xff) * 0.7 | 0;
     const darkColor = (r << 16) | (g << 8) | b;
     const darkMat = new THREE.MeshLambertMaterial({ color: darkColor });
+    const weaponMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
     const s = 0.1; // 1/10 scale factor
+
     // Body
     const body = new THREE.Mesh(new THREE.BoxGeometry(0.6 * s, 0.7 * s, 0.3 * s), mat);
     body.position.y = 0.85 * s;
@@ -418,22 +421,44 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.4 * s, 0.35 * s, 0.35 * s), mat);
     head.position.y = 1.42 * s;
     group.add(head);
-    // Left arm
+
+    // Left arm (simple, no animation group needed)
     const lArm = new THREE.Mesh(new THREE.BoxGeometry(0.2 * s, 0.6 * s, 0.2 * s), mat);
     lArm.position.set(-0.4 * s, 0.85 * s, 0);
     group.add(lArm);
-    // Right arm
+
+    // Right arm group – rotates as the player "holds" and walks with the weapon
+    const rArmGroup = new THREE.Group();
+    rArmGroup.position.set(0.4 * s, 0.85 * s, 0);
+    group.add(rArmGroup);
     const rArm = new THREE.Mesh(new THREE.BoxGeometry(0.2 * s, 0.6 * s, 0.2 * s), mat);
-    rArm.position.set(0.4 * s, 0.85 * s, 0);
-    group.add(rArm);
-    // Left leg
-    const lLeg = new THREE.Mesh(new THREE.BoxGeometry(0.25 * s, 0.6 * s, 0.25 * s), darkMat);
-    lLeg.position.set(-0.17 * s, 0.3 * s, 0);
-    group.add(lLeg);
-    // Right leg
-    const rLeg = new THREE.Mesh(new THREE.BoxGeometry(0.25 * s, 0.6 * s, 0.25 * s), darkMat);
-    rLeg.position.set(0.17 * s, 0.3 * s, 0);
-    group.add(rLeg);
+    rArmGroup.add(rArm);
+    // Gun body attached to right arm (moves with arm animation)
+    const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.12 * s, 0.08 * s, 0.45 * s), weaponMat);
+    gunBody.position.set(0, -0.02 * s, -0.28 * s);
+    rArmGroup.add(gunBody);
+    // Gun barrel
+    const gunBarrel = new THREE.Mesh(new THREE.BoxGeometry(0.04 * s, 0.04 * s, 0.3 * s), weaponMat);
+    gunBarrel.position.set(0, 0.06 * s, -0.45 * s);
+    rArmGroup.add(gunBarrel);
+
+    // Left leg group
+    const lLegGroup = new THREE.Group();
+    lLegGroup.position.set(-0.17 * s, 0.3 * s, 0);
+    group.add(lLegGroup);
+    lLegGroup.add(new THREE.Mesh(new THREE.BoxGeometry(0.25 * s, 0.6 * s, 0.25 * s), darkMat));
+
+    // Right leg group
+    const rLegGroup = new THREE.Group();
+    rLegGroup.position.set(0.17 * s, 0.3 * s, 0);
+    group.add(rLegGroup);
+    rLegGroup.add(new THREE.Mesh(new THREE.BoxGeometry(0.25 * s, 0.6 * s, 0.25 * s), darkMat));
+
+    // Store animatable references on the group's userData
+    group.userData.rArmGroup = rArmGroup;
+    group.userData.lLegGroup = lLegGroup;
+    group.userData.rLegGroup = rLegGroup;
+
     return group;
   }
 
@@ -547,13 +572,34 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
       }
     }
 
-    // Interpolate other players
+    // Interpolate other players + animate arms/legs/gun
+    const elapsed = clock.getElapsedTime();
     otherPlayers.forEach(p => {
       p.mesh.position.lerp(p.targetPos, 0.18);
+      const moveDist = p.mesh.position.distanceTo(p.targetPos);
+      const isMoving = moveDist > 0.002;
+      const freq = isMoving ? 7 : 1.5;
+      const armAmt = isMoving ? 0.3 : 0.06;
+      const legAmt = isMoving ? 0.4 : 0;
+      const meshData = p.mesh.userData;
+      if (meshData.rArmGroup) meshData.rArmGroup.rotation.x = Math.sin(elapsed * freq) * armAmt;
+      if (meshData.lLegGroup) meshData.lLegGroup.rotation.x = Math.sin(elapsed * freq) * legAmt;
+      if (meshData.rLegGroup) meshData.rLegGroup.rotation.x = Math.sin(elapsed * freq + Math.PI) * legAmt;
     });
 
-    // Update weapon animations
+    // Update weapon animations (FBX mixer)
     if (weaponMixer) weaponMixer.update(delta);
+
+    // Local gun bob (walk sway or idle sway)
+    if (mapLoaded) {
+      const isMoving = isPointerLocked &&
+        (keys['KeyW'] || keys['KeyA'] || keys['KeyS'] || keys['KeyD']);
+      const bobFreq = isMoving ? 7 : 1.5;
+      const bobY   = isMoving ? 0.007 : 0.002;
+      const bobX   = isMoving ? 0.003 : 0.001;
+      gunContainer.position.y = -0.07 + Math.sin(elapsed * bobFreq) * bobY;
+      gunContainer.position.x =  0.09 + Math.sin(elapsed * bobFreq * 0.5) * bobX;
+    }
 
     // Chunk update (every 500ms)
     if (now - lastChunkCheck > 500) {
