@@ -316,9 +316,8 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
       const center = scaledBox.getCenter(new THREE.Vector3());
       fbx.position.sub(center);
 
-      // Y-flip (Math.PI) puts butt toward camera; +60° on Y angled inward
-      // for a natural FPS rifle hold with stock facing the player.
-      fbx.rotation.set(0, Math.PI + Math.PI / 3, 0);
+      // 60° Y rotation only (no Y-flip): butt faces camera, barrel points into scene.
+      fbx.rotation.set(0, Math.PI / 3, 0);
 
       // Load the actual PNG texture (FBX references TGA which isn't supported)
       const texLoader = new THREE.TextureLoader();
